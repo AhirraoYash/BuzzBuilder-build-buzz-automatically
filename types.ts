@@ -1,5 +1,5 @@
 
-export type View = 'Dashboard' | 'Trend Analyzer' | 'Post Generator' | 'Settings';
+export type View = 'Dashboard' | 'Trend Analyzer' | 'Post Generator' |'Viral Database' | 'Settings';
 
 export interface LinkedInPost {
   id: number;

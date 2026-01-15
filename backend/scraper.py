@@ -3,100 +3,148 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import time
+import random
+import os
+from database import save_scraped_posts_to_db
 
-def scrape_linkedin_posts(hashtag, count=3):
-    print("🚀 Starting Scraper (Interactive Mode)...")
-    
-    # 1. Setup Clean Chrome (No Profile Paths, No Conflicts)
+# --- FUNCTION 1: API MODE (Search Hashtags) ---
+def scrape_linkedin_posts(hashtag, count=5):
+    print(f"🚀 API Scraper: Searching for #{hashtag}...")
     options = webdriver.ChromeOptions()
     options.add_argument("--start-maximized")
     options.add_argument("--disable-notifications")
-    
-    # Anti-bot detection
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
+    
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-        
-        # 2. Go to Login Page
-        print("🌍 Opening LinkedIn...")
         driver.get("https://www.linkedin.com/login")
-        
-        # 3. THE MAGIC PAUSE
-        # The Python terminal will freeze here until you press ENTER
-        print("\n" + "="*50)
-        print("🛑 ACTION REQUIRED:")
-        print("1. Look at the Chrome window.")
-        print("2. Log in to LinkedIn manually.")
-        print("3. Solve any captchas.")
-        print("4. Once you see your Feed, come back here and PRESS ENTER.")
-        print("="*50 + "\n")
-        
-        # This input() function pauses the script indefinitely
-        # We need a way to bypass this if running from API, so we'll use a smart wait loop instead
-        
-        # Smart Wait Loop (Waits for you to reach the feed)
-        print("⏳ Waiting for you to log in... (I am watching the URL)")
-        max_wait = 120 # 2 minutes
-        start_time = time.time()
-        
-        while True:
-            try:
-                if "feed" in driver.current_url:
-                    print("✅ I see the Feed! Login detected.")
-                    break
-                if time.time() - start_time > max_wait:
-                    print("❌ Timed out waiting for login.")
-                    return []
-                time.sleep(1)
-            except:
-                break
-
-        # --- PHASE 2: SEARCH ---
-        print(f"🔍 Searching for #{hashtag}...")
+        print("🛑 Log in quickly if needed!")
+        time.sleep(15) 
         driver.get(f"https://www.linkedin.com/search/results/content/?keywords={hashtag}&origin=GLOBAL_SEARCH_HEADER")
         time.sleep(5)
         
-        # --- PHASE 3: EXTRACT ---
         posts_data = []
-        # Try multiple selectors
-        selectors = ["feed-shared-update-v2", "occludable-update", "artdeco-card"]
+        cards = driver.find_elements(By.CLASS_NAME, "feed-shared-update-v2")
         
-        found_elements = []
-        for s in selectors:
-            found = driver.find_elements(By.CLASS_NAME, s)
-            if found:
-                found_elements = found
-                break
-        
-        print(f"Found {len(found_elements)} posts.")
-
-        for i, post in enumerate(found_elements[:count]):
+        for i, card in enumerate(cards[:count]):
             try:
-                text = post.text
+                text = card.text
                 if len(text) < 20: continue
-                
-                lines = text.split('\n')
-                author = lines[0] if lines else "User"
-                
                 posts_data.append({
                     "id": i,
-                    "author": author,
+                    "author": "LinkedIn User",
                     "content": text[:200] + "...",
-                    "viralityScore": 85 + i,
                     "likes": "High"
                 })
-            except:
-                continue
-                
+            except: continue
         return posts_data
-
     except Exception as e:
-        print(f"❌ Scraper Error: {e}")
+        print(f"❌ Error: {e}")
         return []
     finally:
-        # Keep browser open for a bit so you can see the result
-        time.sleep(5)
-        if 'driver' in locals():
-            driver.quit()
+        driver.quit()
+
+# --- FUNCTION 2: HARVEST MODE (Robust Version) ---
+def start_feed_harvest():
+    TARGET_POSTS = 100
+    print(f"🚜 Starting Harvest -> MongoDB... Target: {TARGET_POSTS} posts")
+    
+    options = webdriver.ChromeOptions()
+    options.add_argument("--start-maximized")
+    options.add_argument("--disable-notifications")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    
+    try:
+        print("🌍 Opening LinkedIn...")
+        driver.get("https://www.linkedin.com/login")
+        print("\n🛑 ACTION REQUIRED: Log in manually. Press ENTER in terminal when you see your Feed.")
+        input() 
+        
+        print("✅ Starting scroll...")
+        
+        collected_count = 0
+        scroll_stuck_count = 0
+        last_height = driver.execute_script("return document.body.scrollHeight")
+
+        while collected_count < TARGET_POSTS:
+            # 1. Try Multiple Selectors to find posts
+            cards = driver.find_elements(By.CLASS_NAME, "feed-shared-update-v2")
+            if not cards:
+                cards = driver.find_elements(By.TAG_NAME, "article") # Backup selector
+            
+            print(f"👀 I see {len(cards)} posts on screen...")
+
+            batch = []
+            for card in cards:
+                try:
+                    text = card.text
+                    if len(text) < 50: continue # Skip short/empty posts
+                    
+                    # 2. Robust Like Extraction
+                    likes = 0
+                    try:
+                        # Strategy A: Standard Social Count
+                        raw_block = card.find_element(By.CSS_SELECTOR, ".social-details-social-counts").text
+                        likes = int(''.join(filter(str.isdigit, raw_block)))
+                    except:
+                        # Strategy B: Reaction Text (e.g., "100 comments")
+                        try:
+                            raw_text = card.text
+                            # Simple heuristic: Look for numbers near the bottom
+                            lines = raw_text.split('\n')
+                            for line in lines[-5:]: # Check last 5 lines
+                                if "reaction" in line or "comment" in line:
+                                    nums = [int(s) for s in line.split() if s.isdigit()]
+                                    if nums: likes = max(nums)
+                        except:
+                            likes = 0 # Failed to find likes
+
+                    # 3. SAVE EVEN IF LIKES ARE 0 (We filter later)
+                    # We default to 10 likes if 0, just so we save the training text
+                    final_likes = likes if likes > 0 else 10 
+
+                    batch.append({
+                        "content": text,
+                        "likes": final_likes,
+                        "source": "Home Feed",
+                        "timestamp": time.time()
+                    })
+                except Exception as e:
+                    # print(f"⚠️ skipped a post: {e}")
+                    continue
+            
+            # Save Batch
+            if batch:
+                save_scraped_posts_to_db(batch)
+                collected_count += len(batch)
+                print(f"💾 Saved batch of {len(batch)}. Total: {collected_count}/{TARGET_POSTS}")
+            else:
+                print("⚠️ No valid posts found in this scroll.")
+            
+            # Scroll & Sleep
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(random.uniform(3, 6))
+            
+            # Stickiness Check
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                scroll_stuck_count += 1
+                if scroll_stuck_count > 3:
+                    print("⚠️ End of Feed reached.")
+                    break
+            else:
+                scroll_stuck_count = 0
+            last_height = new_height
+
+        print("🎉 Harvest Complete!")
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        driver.quit()
+
+if __name__ == "__main__":
+    start_feed_harvest()

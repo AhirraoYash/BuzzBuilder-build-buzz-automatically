@@ -1,17 +1,17 @@
-
 import React from 'react';
 import { ThumbsUp, MessageCircle, Repeat, Send } from 'lucide-react';
 
 interface LinkedInPostPreviewProps {
   content: string;
+  image?: string | null; // <--- ADDED THIS (Optional image)
 }
 
-const LinkedInPostPreview: React.FC<LinkedInPostPreviewProps> = ({ content }) => {
+const LinkedInPostPreview: React.FC<LinkedInPostPreviewProps> = ({ content, image }) => {
   const [showMore, setShowMore] = React.useState(false);
   const displayContent = content.length > 200 && !showMore ? `${content.substring(0, 200)}...` : content;
 
   return (
-    <div className="bg-[#1b1f23] rounded-lg border border-white/10 p-4 w-full max-w-lg mx-auto">
+    <div className="bg-[#1b1f23] rounded-lg border border-white/10 p-4 w-full max-w-lg mx-auto shadow-xl">
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
         <img src="https://picsum.photos/seed/user/100/100" alt="User Avatar" className="h-12 w-12 rounded-full" />
@@ -23,7 +23,7 @@ const LinkedInPostPreview: React.FC<LinkedInPostPreviewProps> = ({ content }) =>
         <button className="text-sm font-semibold text-blue-400 hover:text-blue-300">+ Follow</button>
       </div>
 
-      {/* Content */}
+      {/* Text Content */}
       <div className="text-sm text-white/90 whitespace-pre-wrap mb-3">
         <p>{displayContent}</p>
         {content.length > 200 && !showMore && (
@@ -32,6 +32,17 @@ const LinkedInPostPreview: React.FC<LinkedInPostPreviewProps> = ({ content }) =>
           </button>
         )}
       </div>
+
+      {/* 🖼️ AI IMAGE DISPLAY (The New Part) */}
+      {image && (
+        <div className="mb-3 rounded-lg overflow-hidden border border-white/10">
+          <img 
+            src={image} 
+            alt="AI Generated Visual" 
+            className="w-full h-auto object-cover max-h-[400px]" 
+          />
+        </div>
+      )}
 
       {/* Reactions Bar */}
       <div className="flex justify-between items-center text-xs text-white/60 pb-2 border-b border-white/10">

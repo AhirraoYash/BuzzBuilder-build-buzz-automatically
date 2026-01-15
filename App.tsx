@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Layout } from './components/Layout';
@@ -6,6 +5,7 @@ import Dashboard from './views/Dashboard';
 import TrendAnalyzer from './views/TrendAnalyzer';
 import PostGenerator from './views/PostGenerator';
 import Settings from './views/Settings';
+import ViralDatabase from './views/ViralDatabase'; // <--- 1. IMPORT THIS
 import type { View } from './types';
 
 const App: React.FC = () => {
@@ -19,6 +19,8 @@ const App: React.FC = () => {
         return <TrendAnalyzer />;
       case 'Post Generator':
         return <PostGenerator />;
+      case 'Viral Database':  // <--- 2. ADD THIS CASE
+        return <ViralDatabase />;
       case 'Settings':
         return <Settings />;
       default:

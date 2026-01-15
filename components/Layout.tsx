@@ -1,7 +1,6 @@
-
 import React from 'react';
 import { motion } from 'framer-motion';
-import { LayoutDashboard, BarChart3, Bot, Settings, Rocket } from 'lucide-react';
+import { LayoutDashboard, BarChart3, Bot, Settings, Rocket, Database } from 'lucide-react'; // <--- 1. Added Database icon
 import type { View } from '../types';
 
 interface LayoutProps {
@@ -14,15 +13,16 @@ const navItems = [
   { name: 'Dashboard' as View, icon: LayoutDashboard },
   { name: 'Trend Analyzer' as View, icon: BarChart3 },
   { name: 'Post Generator' as View, icon: Bot },
+  { name: 'Viral Database' as View, icon: Database }, // <--- 2. Added New Menu Item
   { name: 'Settings' as View, icon: Settings },
 ];
 
 export const Layout: React.FC<LayoutProps> = ({ children, activeView, setActiveView }) => {
   return (
-    <div className="flex h-screen w-full font-sans">
+    <div className="flex h-screen w-full font-sans bg-[#0d1117] text-white">
       <aside className="fixed left-0 top-0 h-full w-16 md:w-56 bg-black/30 backdrop-blur-xl border-r border-white/10 z-10 flex flex-col items-center md:items-start p-4 transition-all duration-300">
         <div className="flex items-center gap-2 mb-10 w-full justify-center md:justify-start">
-            <Rocket className="text-white/90 h-8 w-8" />
+            <Rocket className="text-blue-500 h-8 w-8" />
             <span className="hidden md:inline text-xl font-bold text-white/90">VaxTrack</span>
         </div>
         <nav className="flex flex-col gap-2 w-full">
