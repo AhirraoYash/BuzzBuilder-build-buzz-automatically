@@ -6,9 +6,8 @@ import os
 import requests
 import base64
 import time
+import datetime
 from dotenv import load_dotenv
-
-# --- IMPORTS FROM YOUR OTHER FILES ---
 from scraper import scrape_linkedin_posts
 from database import viral_collection, history_collection
 
@@ -17,9 +16,6 @@ load_dotenv()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 HF_KEY = os.getenv("HF_API_KEY")
 
-# 2. Configure Gemini
-if not GEMINI_KEY:
-    print("❌ ERROR: GEMINI_API_KEY missing in .env")
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
@@ -34,89 +30,112 @@ app.add_middleware(
 )
 
 class PostRequest(BaseModel):
-    topic: str
+    topic: str = "" # Optional now
     tone: str
+    session_timestamp: float = 0 # The ID of the batch to analyze
 
-# --- HELPER 1: IMAGE GENERATOR (Hugging Face) ---
+# --- HELPER: IMAGE GENERATOR ---
 def generate_image_from_prompt(prompt_text):
-    print(f"🎨 Painting image for: {prompt_text[:30]}...")
+    print(f"🎨 Painting: {prompt_text[:30]}...")
     API_URL = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0"
     headers = {"Authorization": f"Bearer {HF_KEY}"}
     
     try:
         response = requests.post(API_URL, headers=headers, json={"inputs": prompt_text})
         if response.status_code == 200:
-            # Convert binary image to Base64 string so React can show it
             img_str = base64.b64encode(response.content).decode("utf-8")
             return f"data:image/png;base64,{img_str}"
-        else:
-            print(f"❌ HF Error: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"❌ Image Gen Failed: {e}")
+        return None
+    except:
         return None
 
-# --- HELPER 2: GET TRAINING DATA FROM MONGODB ---
-def get_viral_context():
-    """Fetches top 3 liked posts from MongoDB to train the AI."""
-    try:
-        if viral_collection is None:
-            return ""
+# --- NEW ENDPOINT: GET AVAILABLE SESSIONS ---
+@app.get("/sessions")
+def get_harvest_sessions():
+    """Groups posts by hour to create 'Sessions' for the dropdown."""
+    if viral_collection is None: return []
 
-        # Query: Sort by likes descending, limit 3
-        top_posts = list(viral_collection.find().sort("likes", -1).limit(3))
+    # Get all timestamps
+    cursor = viral_collection.find({}, {"timestamp": 1, "likes": 1})
+    sessions = {}
+
+    for doc in cursor:
+        ts = doc.get("timestamp", 0)
+        # Group by Hour (e.g., "2024-01-15 20:00")
+        dt = datetime.datetime.fromtimestamp(ts)
+        key = dt.strftime("%Y-%m-%d %H:00")
         
-        if not top_posts:
-            print("⚠️ MongoDB: No training data found yet.")
-            return ""
-
-        print(f"🧠 MongoDB: Loaded {len(top_posts)} top viral posts for context.")
+        if key not in sessions:
+            sessions[key] = {"label": key, "count": 0, "avg_likes": 0, "timestamp": ts}
         
-        context_string = "Here are 3 examples of REAL viral posts. Mimic their style:\n\n"
-        for i, p in enumerate(top_posts):
-            context_string += f"--- EXAMPLE {i+1} ---\n{p['content'][:400]}...\n\n"
-            
-        return context_string
-    except Exception as e:
-        print(f"⚠️ DB Error: {e}")
-        return ""
+        sessions[key]["count"] += 1
+        sessions[key]["avg_likes"] += doc.get("likes", 0)
 
-# --- ENDPOINTS ---
+    # Convert to list and sort by new
+    result = list(sessions.values())
+    result.sort(key=lambda x: x["label"], reverse=True)
+    return result
 
-@app.get("/")
-def read_root():
-    return {"status": "VaxTrack Viral Engine (MongoDB Edition) 🚀"}
+@app.get("/database")
+def get_training_data():
+    if viral_collection is None: return []
+    posts = list(viral_collection.find().sort("likes", -1).limit(50))
+    for post in posts: post['_id'] = str(post['_id'])
+    return posts
 
-@app.get("/analyze")
-def analyze_trends(hashtag: str):
-    print(f"🕵️‍♀️ Scraping LinkedIn for: {hashtag}")
-    # This calls the function from scraper.py
-    posts = scrape_linkedin_posts(hashtag, count=5)
-    return {"status": "success", "posts": posts}
-
+# --- UPDATED GENERATOR ---
 @app.post("/generate")
 def generate_viral_post(request: PostRequest):
-    # 1. Get Context from DB
-    viral_examples = get_viral_context()
     
-    print(f"🧠 Thinking about: {request.topic}...")
+    # 1. Fetch Specific Batch Context
+    context_posts = []
     
+    if request.session_timestamp > 0:
+        # Find posts within 1 hour of the selected session
+        start_time = request.session_timestamp - 1800 # -30 mins
+        end_time = request.session_timestamp + 3600   # +1 hour
+        
+        query = {"timestamp": {"$gte": start_time, "$lte": end_time}}
+        context_posts = list(viral_collection.find(query).sort("likes", -1).limit(10))
+        print(f"🧠 Focused Mode: Analyzing {len(context_posts)} posts from selected session.")
+    else:
+        # Fallback to global top 3
+        context_posts = list(viral_collection.find().sort("likes", -1).limit(3))
+
+    # Build Context String
+    context_str = ""
+    for p in context_posts:
+        context_str += f"- {p['content'][:300]}... (Likes: {p.get('likes', 0)})\n"
+
+    # 2. Construct Prompt (Auto-Topic Detection)
+    topic_instruction = ""
+    if request.topic:
+        topic_instruction = f"Write a post specifically about: '{request.topic}'."
+    else:
+        topic_instruction = "Analyze the trends in the provided examples. Detect the most viral topic from them and write a new post about that topic."
+
     prompt = f"""
-    Act as a expert LinkedIn Ghostwriter.
-    {viral_examples}
+    Act as a top LinkedIn Creator.
     
-    TASK: Write a new viral post about: "{request.topic}".
-    TONE: {request.tone}.
+    INPUT DATA (The Viral Style to Mimic):
+    {context_str}
     
-    Output strictly in this format:
+    TASK:
+    {topic_instruction}
+    Tone: {request.tone}.
+    
+    1. Write the Post (High engagement hooks, short lines).
+    2. Write an Image Prompt (Visual description).
+    
+    Output Format:
     [POST]
-    (Content)
+    ... content ...
     [IMAGE]
-    (Visual Description)
+    ... description ...
     """
     
     try:
-        # A. Generate Text
+        # Generate Text
         ai_response = model.generate_content(prompt).text
         
         post_content = ""
@@ -128,49 +147,21 @@ def generate_viral_post(request: PostRequest):
             image_prompt = parts[1].strip()
         else:
             post_content = ai_response
-            image_prompt = f"Abstract modern tech representation of {request.topic}"
+            image_prompt = "Abstract tech background"
 
-        # B. Generate Image
+        # Generate Image
         image_url = generate_image_from_prompt(image_prompt)
         
-        # C. SAVE TO MONGODB (The "History" Feature)
+        # Save History
         if history_collection is not None:
-            new_record = {
-                "topic": request.topic,
-                "tone": request.tone,
+            history_collection.insert_one({
+                "topic": request.topic or "Auto-Detected",
                 "content": post_content,
-                "image_prompt": image_prompt,
-                "image_base64": image_url, # Storing the image string
+                "image_base64": image_url,
                 "timestamp": time.time()
-            }
-            history_collection.insert_one(new_record)
-            print("💾 Saved generated result to MongoDB History!")
+            })
         
-        return {
-            "content": post_content,
-            "image": image_url 
-        }
+        return {"content": post_content, "image": image_url}
 
     except Exception as e:
-        return {"content": f"AI Error: {str(e)}", "image": None}
-
-@app.get("/database")
-def get_training_data():
-    """Fetches the top 50 viral posts stored in MongoDB."""
-    try:
-        if viral_collection is None:
-            return []
-
-        # Get top 50 posts, sorted by Likes (Highest first)
-        posts_cursor = viral_collection.find().sort("likes", -1).limit(50)
-        posts = list(posts_cursor)
-
-        # Fix MongoDB ObjectId (it breaks JSON if not converted to string)
-        for post in posts:
-            post['_id'] = str(post['_id'])
-            
-        print(f"📂 Sent {len(posts)} archived posts to frontend.")
-        return posts
-    except Exception as e:
-        print(f"❌ Database Fetch Error: {e}")
-        return []
+        return {"content": f"Error: {str(e)}", "image": None}
