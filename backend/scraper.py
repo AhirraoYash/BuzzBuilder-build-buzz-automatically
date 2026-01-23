@@ -6,6 +6,10 @@ import time
 import random
 import os
 from database import save_scraped_posts_to_db
+# Load variables at the top of the file
+load_dotenv()
+
+
 
 # --- FUNCTION 1: API MODE (Search Hashtags) ---
 def scrape_linkedin_posts(hashtag, count=5):
@@ -148,3 +152,4 @@ def start_feed_harvest():
 
 if __name__ == "__main__":
     start_feed_harvest()
+
