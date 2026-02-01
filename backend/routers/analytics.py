@@ -1,6 +1,8 @@
 from fastapi import APIRouter, BackgroundTasks
 from database import viral_collection, history_collection
 from scraper import start_feed_harvest
+from pydantic import BaseModel
+import scraper_state
 import datetime
 import time
 
@@ -93,3 +95,17 @@ def trigger_scrape(background_tasks: BackgroundTasks):
     background_tasks.add_task(start_feed_harvest)
     return {"status": "started"}
 
+@router.get("/scraper-status")
+def get_scraper_status():
+    """Frontend calls this every 1s to update the popup."""
+    return scraper_state.state
+
+class OTPRequest(BaseModel):
+    otp: str
+
+@router.post("/submit-otp")
+def submit_otp(data: OTPRequest):
+    """Frontend sends the OTP here."""
+    print(f"📩 Received OTP from Frontend: {data.otp}")
+    scraper_state.state["otp_input"] = data.otp
+    return {"status": "received"}

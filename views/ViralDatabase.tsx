@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Database, Play, ChevronDown, ChevronUp, Calendar, Loader2 } from 'lucide-react';
 import LinkedInPostPreview from '../components/LinkedInPostPreview';
+import ScraperStatusModal from '../components/ScraperStatusModal'; // <--- NEW IMPORT
 
 interface Session {
   label: string;
@@ -17,6 +18,7 @@ const ViralDatabase: React.FC = () => {
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [scraping, setScraping] = useState(false);
+  const [showScraperModal, setShowScraperModal] = useState(false); // <--- MODAL STATE
 
   // 1. Load the list of batches (Sessions)
   const fetchSessions = async () => {
@@ -38,13 +40,16 @@ const ViralDatabase: React.FC = () => {
   // 2. Trigger the Scraper
   const handleStartScrape = async () => {
     setScraping(true);
+    setShowScraperModal(true); // <--- OPEN MODAL IMMEDIATELY
     try {
       await fetch('http://localhost:8000/trigger-scrape', { method: 'POST' });
-      alert("🚀 Scraper Started! \n\nA Chrome window will open on your computer.\nPlease log in and press ENTER in the terminal if asked.");
     } catch (err) {
       alert("Failed to start scraper.");
+      setScraping(false);
+      setShowScraperModal(false);
     }
-    // We don't turn off 'scraping' immediately because it runs in background
+    
+    // Reset button state after a delay (or rely on modal close)
     setTimeout(() => setScraping(false), 5000); 
   };
 
@@ -70,6 +75,15 @@ const ViralDatabase: React.FC = () => {
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8">
       
+      {/* --- THE NEW MODAL --- */}
+      <ScraperStatusModal 
+        isOpen={showScraperModal} 
+        onClose={() => {
+            setShowScraperModal(false);
+            fetchSessions(); // Refresh list when modal closes
+        }} 
+      />
+
       {/* Header & Controls */}
       <div className="flex flex-col md:flex-row justify-between items-center bg-[#161b22] p-6 rounded-xl border border-white/10 shadow-lg">
         <div>
@@ -92,7 +106,7 @@ const ViralDatabase: React.FC = () => {
           }`}
         >
           {scraping ? <Loader2 className="animate-spin h-5 w-5" /> : <Play className="h-5 w-5 fill-current" />}
-          {scraping ? "Scraper Running..." : "Start New Scrape"}
+          {scraping ? "Starting..." : "Start New Scrape"}
         </button>
       </div>
 
@@ -130,7 +144,7 @@ const ViralDatabase: React.FC = () => {
                 <div className="border-t border-white/10 bg-[#0d1117] p-6 animate-in slide-in-from-top-2 duration-200">
                   {loadingPosts ? (
                     <div className="flex justify-center py-8 text-blue-400 gap-2">
-                       <Loader2 className="animate-spin" /> Loading posts...
+                        <Loader2 className="animate-spin" /> Loading posts...
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
